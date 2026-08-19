@@ -1,0 +1,1783 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>FinCast — Sector Growth Forecasting Agent</title>
+<meta name="description" content="Transparent, driver-based 5-year financial forecasting for Utilities, Consumer Staples, and Pharmaceuticals. Bear/Base/Bull scenario modeling with traceable CAGR math."/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+/* ========= DESIGN TOKENS ========= */
+:root {
+  --bg-base:       #070c1a;
+  --bg-panel:      rgba(255,255,255,0.04);
+  --bg-panel-hi:   rgba(255,255,255,0.08);
+  --border:        rgba(255,255,255,0.08);
+  --border-hi:     rgba(255,255,255,0.18);
+  --text-primary:  #f0f4ff;
+  --text-secondary:#8b98b8;
+  --text-dim:      #4a5578;
+
+  /* Sector accent: default teal (utility) */
+  --accent:        #00d4aa;
+  --accent-glow:   rgba(0,212,170,0.18);
+  --accent-dim:    rgba(0,212,170,0.08);
+
+  /* Scenario colors */
+  --bear:  #f87171;
+  --base:  #60a5fa;
+  --bull:  #34d399;
+
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --shadow:    0 8px 32px rgba(0,0,0,0.5);
+  --shadow-lg: 0 20px 60px rgba(0,0,0,0.7);
+
+  --step-count: 6;
+  --transition: 0.3s cubic-bezier(0.4,0,0.2,1);
+}
+/* Sector themes */
+body[data-sector="utilities"] { --accent:#00d4aa; --accent-glow:rgba(0,212,170,0.18); --accent-dim:rgba(0,212,170,0.08); }
+body[data-sector="staples"]   { --accent:#fbbf24; --accent-glow:rgba(251,191,36,0.18); --accent-dim:rgba(251,191,36,0.08); }
+body[data-sector="pharma"]    { --accent:#a78bfa; --accent-glow:rgba(167,139,250,0.18); --accent-dim:rgba(167,139,250,0.08); }
+
+/* ========= RESET / BASE ========= */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html{scroll-behavior:smooth;}
+body{
+  font-family:'Inter',sans-serif;
+  background:var(--bg-base);
+  color:var(--text-primary);
+  min-height:100vh;
+  overflow-x:hidden;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(0,212,170,0.07) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 110%, rgba(96,165,250,0.05) 0%, transparent 60%);
+}
+
+/* ========= SCROLLBAR ========= */
+::-webkit-scrollbar{width:6px;}
+::-webkit-scrollbar-track{background:var(--bg-base);}
+::-webkit-scrollbar-thumb{background:var(--border-hi);border-radius:99px;}
+
+/* ========= HEADER ========= */
+header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:18px 40px;
+  border-bottom:1px solid var(--border);
+  background:rgba(7,12,26,0.8);
+  backdrop-filter:blur(20px);
+  position:sticky;top:0;z-index:100;
+}
+.logo{
+  display:flex;align-items:center;gap:10px;
+  font-size:1.25rem;font-weight:800;letter-spacing:-0.03em;
+}
+.logo-icon{
+  width:32px;height:32px;border-radius:8px;
+  background:linear-gradient(135deg,var(--accent),rgba(96,165,250,0.8));
+  display:flex;align-items:center;justify-content:center;
+  font-size:16px;
+  box-shadow:0 0 16px var(--accent-glow);
+  transition:box-shadow var(--transition);
+}
+.logo-text span{color:var(--accent);}
+.header-badge{
+  font-size:0.7rem;font-weight:600;letter-spacing:0.08em;
+  color:var(--text-secondary);background:var(--bg-panel);
+  border:1px solid var(--border);border-radius:99px;
+  padding:4px 12px;text-transform:uppercase;
+}
+
+/* ========= PROGRESS WIZARD ========= */
+.wizard-bar{
+  padding:24px 40px 0;
+  display:flex;align-items:center;gap:0;
+  max-width:1100px;margin:0 auto;
+}
+.wizard-step{
+  display:flex;align-items:center;gap:0;flex:1;
+}
+.wizard-step:last-child{flex:0;}
+.step-node{
+  display:flex;align-items:center;gap:8px;cursor:pointer;
+  position:relative;
+}
+.step-circle{
+  width:32px;height:32px;border-radius:50%;
+  border:2px solid var(--border);
+  display:flex;align-items:center;justify-content:center;
+  font-size:0.75rem;font-weight:700;
+  color:var(--text-dim);
+  background:var(--bg-base);
+  transition:all var(--transition);
+  flex-shrink:0;
+}
+.step-circle.active{
+  border-color:var(--accent);color:var(--accent);
+  box-shadow:0 0 0 4px var(--accent-dim);
+  background:var(--accent-dim);
+}
+.step-circle.done{
+  border-color:var(--accent);background:var(--accent);color:#070c1a;
+}
+.step-label{
+  font-size:0.7rem;font-weight:500;color:var(--text-dim);white-space:nowrap;
+  transition:color var(--transition);
+}
+.step-node.active .step-label,.step-node.done .step-label{color:var(--text-secondary);}
+.step-connector{
+  flex:1;height:2px;
+  background:var(--border);
+  margin:0 6px;
+  position:relative;overflow:hidden;
+}
+.step-connector::after{
+  content:'';position:absolute;inset:0;
+  background:var(--accent);
+  transform:scaleX(0);transform-origin:left;
+  transition:transform 0.5s ease;
+}
+.step-connector.done::after{transform:scaleX(1);}
+
+/* ========= MAIN LAYOUT ========= */
+.main{
+  max-width:1100px;margin:0 auto;padding:32px 40px 80px;
+}
+
+/* ========= GLASS PANEL ========= */
+.panel{
+  background:var(--bg-panel);
+  border:1px solid var(--border);
+  border-radius:var(--radius-lg);
+  padding:28px 32px;
+  backdrop-filter:blur(12px);
+  box-shadow:var(--shadow);
+  transition:border-color var(--transition);
+}
+.panel:hover{border-color:var(--border-hi);}
+
+/* ========= STEP PAGES ========= */
+.step-page{display:none;animation:fadeIn 0.4s ease;}
+.step-page.active{display:block;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);}}
+
+/* ========= TYPOGRAPHY ========= */
+.page-title{font-size:1.6rem;font-weight:800;letter-spacing:-0.03em;margin-bottom:6px;}
+.page-title span{color:var(--accent);}
+.page-subtitle{font-size:0.9rem;color:var(--text-secondary);margin-bottom:28px;line-height:1.6;}
+.section-label{
+  font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;
+  color:var(--text-secondary);margin-bottom:10px;
+}
+
+/* ========= FORM ELEMENTS ========= */
+label{display:block;font-size:0.82rem;font-weight:500;color:var(--text-secondary);margin-bottom:6px;}
+input[type=text],input[type=number],select,textarea{
+  width:100%;background:rgba(0,0,0,0.3);
+  border:1px solid var(--border);border-radius:var(--radius-sm);
+  color:var(--text-primary);font-family:'Inter',sans-serif;
+  font-size:0.88rem;padding:10px 14px;
+  outline:none;transition:border-color var(--transition),box-shadow var(--transition);
+  appearance:none;
+}
+input[type=text]:focus,input[type=number]:focus,select:focus,textarea:focus{
+  border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim);
+}
+select option{background:#0f1829;}
+textarea{resize:vertical;min-height:80px;}
+
+/* Range slider */
+input[type=range]{
+  -webkit-appearance:none;width:100%;height:4px;
+  background:var(--border);border-radius:99px;outline:none;cursor:pointer;
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:18px;height:18px;border-radius:50%;
+  background:var(--accent);box-shadow:0 0 8px var(--accent-glow);
+  cursor:pointer;transition:transform 0.15s;
+}
+input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.2);}
+
+/* ========= BUTTONS ========= */
+.btn{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:11px 24px;border-radius:var(--radius-sm);
+  font-family:'Inter',sans-serif;font-size:0.88rem;font-weight:600;
+  cursor:pointer;border:none;transition:all var(--transition);white-space:nowrap;
+}
+.btn-primary{
+  background:var(--accent);color:#070c1a;
+  box-shadow:0 4px 16px var(--accent-glow);
+}
+.btn-primary:hover{filter:brightness(1.1);transform:translateY(-1px);}
+.btn-secondary{
+  background:var(--bg-panel-hi);color:var(--text-primary);
+  border:1px solid var(--border-hi);
+}
+.btn-secondary:hover{background:rgba(255,255,255,0.12);border-color:var(--accent);}
+.btn-ghost{background:transparent;color:var(--text-secondary);border:1px solid var(--border);}
+.btn-ghost:hover{color:var(--text-primary);border-color:var(--border-hi);}
+
+.action-row{display:flex;gap:12px;margin-top:28px;align-items:center;}
+.action-row .spacer{flex:1;}
+
+/* ========= GRID HELPERS ========= */
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;}
+.col-gap{display:flex;flex-direction:column;gap:16px;}
+
+/* ========= DATA TABLE ========= */
+.data-table{width:100%;border-collapse:collapse;font-size:0.83rem;}
+.data-table th{
+  text-align:left;padding:10px 12px;
+  font-size:0.7rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;
+  color:var(--text-secondary);border-bottom:1px solid var(--border);
+}
+.data-table td{
+  padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.03);
+}
+.data-table input[type=number]{
+  background:transparent;border:1px solid transparent;border-radius:4px;
+  padding:4px 8px;font-size:0.83rem;width:100%;
+}
+.data-table input[type=number]:focus{border-color:var(--accent);}
+.data-table tr:hover td{background:rgba(255,255,255,0.02);}
+.data-table .col-year{font-weight:600;color:var(--text-secondary);font-family:'JetBrains Mono',monospace;}
+
+/* ========= BADGE ========= */
+.badge{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:3px 9px;border-radius:99px;font-size:0.68rem;font-weight:700;letter-spacing:0.05em;
+}
+.badge-fact{background:rgba(0,212,170,0.12);color:#00d4aa;border:1px solid rgba(0,212,170,0.25);}
+.badge-assumption{background:rgba(251,191,36,0.12);color:#fbbf24;border:1px solid rgba(251,191,36,0.25);}
+.badge-warning{background:rgba(248,113,113,0.12);color:#f87171;border:1px solid rgba(248,113,113,0.25);}
+.badge-info{background:rgba(96,165,250,0.12);color:#60a5fa;border:1px solid rgba(96,165,250,0.25);}
+
+/* ========= FORMULA BOX ========= */
+.formula-box{
+  background:rgba(0,0,0,0.3);border:1px solid var(--border);
+  border-radius:var(--radius-md);padding:20px 24px;
+  font-family:'JetBrains Mono',monospace;font-size:0.9rem;
+  line-height:1.8;color:var(--text-primary);
+  position:relative;overflow:hidden;
+}
+.formula-box::before{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(135deg,var(--accent-dim),transparent 60%);
+  pointer-events:none;
+}
+.formula-accent{color:var(--accent);}
+.formula-op{color:var(--text-secondary);}
+
+/* ========= DRIVER CARD ========= */
+.driver-card{
+  background:var(--bg-panel);border:1px solid var(--border);
+  border-radius:var(--radius-md);padding:20px;
+  display:flex;flex-direction:column;gap:12px;
+  transition:border-color var(--transition),box-shadow var(--transition);
+}
+.driver-card:hover{border-color:var(--accent-glow);box-shadow:0 0 20px var(--accent-dim);}
+.driver-card-header{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}
+.driver-name{font-size:0.88rem;font-weight:600;}
+.driver-cagr{font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:var(--text-secondary);}
+.slider-row{display:flex;align-items:center;gap:12px;}
+.slider-val{
+  min-width:56px;text-align:right;
+  font-family:'JetBrains Mono',monospace;font-size:0.88rem;font-weight:600;color:var(--accent);
+}
+
+/* ========= SCENARIO COLUMNS ========= */
+.scenarios-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;}
+.scenario-col{
+  background:var(--bg-panel);border-radius:var(--radius-md);
+  padding:20px;border:1px solid var(--border);
+}
+.scenario-col.bear{border-top:3px solid var(--bear);}
+.scenario-col.base{border-top:3px solid var(--base);}
+.scenario-col.bull{border-top:3px solid var(--bull);}
+.scenario-title{font-size:0.9rem;font-weight:700;margin-bottom:4px;}
+.scenario-col.bear .scenario-title{color:var(--bear);}
+.scenario-col.base .scenario-title{color:var(--base);}
+.scenario-col.bull .scenario-title{color:var(--bull);}
+.scenario-rev{font-size:1.5rem;font-weight:800;margin:8px 0 4px;font-family:'JetBrains Mono',monospace;}
+.scenario-rev-label{font-size:0.72rem;color:var(--text-secondary);}
+
+/* ========= FORECAST TABLE ========= */
+.forecast-table{width:100%;border-collapse:collapse;font-size:0.83rem;}
+.forecast-table th{
+  padding:10px 14px;font-size:0.7rem;font-weight:700;
+  letter-spacing:0.08em;text-transform:uppercase;color:var(--text-secondary);
+  border-bottom:1px solid var(--border);
+}
+.forecast-table td{padding:10px 14px;border-bottom:1px solid rgba(255,255,255,0.03);}
+.forecast-table .year-col{font-weight:700;font-family:'JetBrains Mono',monospace;}
+.bear-val{color:var(--bear);}
+.base-val{color:var(--base);}
+.bull-val{color:var(--bull);}
+.forecast-table tr:hover td{background:rgba(255,255,255,0.02);}
+
+/* ========= CHART CONTAINER ========= */
+.chart-wrap{
+  background:rgba(0,0,0,0.25);border:1px solid var(--border);
+  border-radius:var(--radius-md);padding:24px;
+  position:relative;
+}
+.chart-wrap canvas{max-height:320px;}
+
+/* ========= ASSUMPTION CARDS ========= */
+.assumption-card{
+  background:var(--bg-panel);border:1px solid var(--border);
+  border-radius:var(--radius-md);padding:16px 20px;
+  display:flex;flex-direction:column;gap:8px;
+}
+.assumption-name{font-size:0.85rem;font-weight:600;display:flex;align-items:center;gap:8px;}
+.assumption-val{font-family:'JetBrains Mono',monospace;font-size:1.1rem;font-weight:700;color:var(--accent);}
+.assumption-justification{font-size:0.78rem;color:var(--text-secondary);line-height:1.5;}
+.assumption-source{font-size:0.72rem;color:var(--text-dim);font-style:italic;}
+
+/* ========= DISCLAIMER ========= */
+.disclaimer{
+  background:rgba(248,113,113,0.06);border:1px solid rgba(248,113,113,0.2);
+  border-radius:var(--radius-md);padding:16px 20px;
+  font-size:0.78rem;line-height:1.6;color:var(--text-secondary);
+  display:flex;gap:12px;align-items:flex-start;margin-top:28px;
+}
+.disclaimer-icon{font-size:1.1rem;flex-shrink:0;margin-top:1px;}
+
+/* ========= NARRATIVE ========= */
+.narrative{
+  background:var(--accent-dim);border:1px solid var(--accent-glow);
+  border-radius:var(--radius-md);padding:20px 24px;
+  font-size:0.88rem;line-height:1.8;color:var(--text-primary);
+}
+.narrative strong{color:var(--accent);}
+
+/* ========= ALERT / WARNING ========= */
+.alert{
+  border-radius:var(--radius-sm);padding:12px 16px;
+  font-size:0.82rem;line-height:1.5;display:flex;gap:10px;align-items:flex-start;
+  margin-top:10px;
+}
+.alert-warn{background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.2);color:#fbbf24;}
+.alert-info{background:rgba(96,165,250,0.08);border:1px solid rgba(96,165,250,0.2);color:#60a5fa;}
+.alert-success{background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.2);color:#34d399;}
+.alert-danger{background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.2);color:#f87171;}
+
+/* ========= SECTOR GUARD ========= */
+.sector-guard{
+  display:none;flex-direction:column;align-items:center;justify-content:center;
+  padding:60px 40px;text-align:center;gap:16px;
+}
+.sector-guard.visible{display:flex;}
+.guard-icon{font-size:3rem;}
+.guard-title{font-size:1.3rem;font-weight:700;color:var(--bear);}
+.guard-body{font-size:0.88rem;color:var(--text-secondary);max-width:480px;line-height:1.7;}
+
+/* ========= RECALIBRATION ========= */
+.recal-card{
+  background:var(--bg-panel);border:1px solid var(--border);
+  border-radius:var(--radius-md);padding:20px;
+}
+.variance-row{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 0;border-bottom:1px solid var(--border);font-size:0.85rem;
+}
+.variance-row:last-child{border-bottom:none;}
+.var-label{color:var(--text-secondary);}
+.var-forecast{font-family:'JetBrains Mono',monospace;}
+.var-actual{font-family:'JetBrains Mono',monospace;}
+.var-delta{font-family:'JetBrains Mono',monospace;font-weight:700;}
+.var-delta.pos{color:var(--bull);}
+.var-delta.neg{color:var(--bear);}
+
+/* ========= CAGR CHIP ========= */
+.cagr-chip{
+  display:inline-flex;align-items:center;gap:4px;
+  font-family:'JetBrains Mono',monospace;font-size:0.78rem;
+  padding:3px 8px;border-radius:4px;
+  background:var(--accent-dim);color:var(--accent);
+}
+
+/* ========= TABS ========= */
+.tab-row{display:flex;gap:4px;background:rgba(0,0,0,0.2);border-radius:var(--radius-sm);padding:4px;margin-bottom:20px;width:fit-content;}
+.tab{
+  padding:7px 16px;border-radius:6px;font-size:0.82rem;font-weight:600;
+  cursor:pointer;color:var(--text-secondary);transition:all var(--transition);border:none;background:transparent;
+}
+.tab.active{background:var(--bg-panel-hi);color:var(--text-primary);}
+
+/* ========= METRIC CARD ========= */
+.metric-card{
+  background:var(--bg-panel);border:1px solid var(--border);
+  border-radius:var(--radius-md);padding:20px;text-align:center;
+}
+.metric-val{font-size:1.6rem;font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--accent);}
+.metric-label{font-size:0.75rem;color:var(--text-secondary);margin-top:4px;}
+
+/* ========= STEP SPECIFIC INTRO CARDS ========= */
+.intro-card{
+  background:linear-gradient(135deg,var(--accent-dim),rgba(96,165,250,0.05));
+  border:1px solid var(--accent-glow);border-radius:var(--radius-md);
+  padding:20px 24px;margin-bottom:24px;
+  display:flex;gap:16px;align-items:flex-start;
+}
+.intro-icon{font-size:1.6rem;flex-shrink:0;}
+
+/* ========= MOBILE ========= */
+@media(max-width:768px){
+  header{padding:14px 20px;}
+  .wizard-bar{padding:20px 20px 0;overflow-x:auto;}
+  .step-label{display:none;}
+  .main{padding:20px 20px 60px;}
+  .grid-2,.grid-3,.scenarios-grid{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body data-sector="utilities">
+
+<!-- ========= HEADER ========= -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">📈</div>
+    <div class="logo-text">Fin<span>Cast</span></div>
+  </div>
+  <div class="header-badge">Driver-Based Forecasting · No ML</div>
+</header>
+
+<!-- ========= WIZARD PROGRESS BAR ========= -->
+<div class="wizard-bar" id="wizardBar">
+  <div class="wizard-step" id="ws1">
+    <div class="step-node active" onclick="jumpStep(1)">
+      <div class="step-circle active" id="sc1">1</div>
+      <span class="step-label">Setup &amp; Data</span>
+    </div>
+    <div class="step-connector" id="scon1"></div>
+  </div>
+  <div class="wizard-step" id="ws2">
+    <div class="step-node" onclick="jumpStep(2)">
+      <div class="step-circle" id="sc2">2</div>
+      <span class="step-label">Driver Formula</span>
+    </div>
+    <div class="step-connector" id="scon2"></div>
+  </div>
+  <div class="wizard-step" id="ws3">
+    <div class="step-node" onclick="jumpStep(3)">
+      <div class="step-circle" id="sc3">3</div>
+      <span class="step-label">Assumptions</span>
+    </div>
+    <div class="step-connector" id="scon3"></div>
+  </div>
+  <div class="wizard-step" id="ws4">
+    <div class="step-node" onclick="jumpStep(4)">
+      <div class="step-circle" id="sc4">4</div>
+      <span class="step-label">Scenarios</span>
+    </div>
+    <div class="step-connector" id="scon4"></div>
+  </div>
+  <div class="wizard-step" id="ws5">
+    <div class="step-node" onclick="jumpStep(5)">
+      <div class="step-circle" id="sc5">5</div>
+      <span class="step-label">Forecast</span>
+    </div>
+    <div class="step-connector" id="scon5"></div>
+  </div>
+  <div class="wizard-step" id="ws6">
+    <div class="step-node" onclick="jumpStep(6)">
+      <div class="step-circle" id="sc6">6</div>
+      <span class="step-label">Recalibrate</span>
+    </div>
+  </div>
+</div>
+
+<!-- ========= MAIN ========= -->
+<div class="main">
+
+<!-- ====================================================
+     STEP 1 — COMPANY SETUP & DATA INGESTION
+===================================================== -->
+<div class="step-page active" id="step1">
+  <div class="page-title">Company Setup &amp; <span>Historical Data</span></div>
+  <div class="page-subtitle">Enter your company details and 5 years of historical financials. We'll flag any suspicious or missing data before proceeding.</div>
+
+  <!-- Sector Guard -->
+  <div class="sector-guard" id="sectorGuard">
+    <div class="guard-icon">🚫</div>
+    <div class="guard-title">Sector Not Supported</div>
+    <div class="guard-body" id="guardBody"></div>
+    <button class="btn btn-secondary" onclick="clearSector()">← Choose a Supported Sector</button>
+  </div>
+
+  <div id="step1Content">
+    <div class="panel">
+      <div class="grid-2">
+        <div class="col-gap">
+          <div>
+            <label for="companyName">Company Name</label>
+            <input type="text" id="companyName" placeholder="e.g. Southern Company, Walmart, Pfizer" value=""/>
+          </div>
+          <div>
+            <label for="sectorSelect">Sector</label>
+            <select id="sectorSelect" onchange="onSectorChange()">
+              <option value="">— Select Sector —</option>
+              <option value="utilities">⚡ Utilities (electricity / water / gas)</option>
+              <option value="staples">🛒 Consumer Staples / Retail</option>
+              <option value="pharma">💊 Pharmaceuticals (established portfolio)</option>
+              <option value="tech">💻 Technology</option>
+              <option value="commodity">🛢️ Commodities / Mining</option>
+              <option value="biotech">🧬 Early-stage Biotech</option>
+              <option value="realestate">🏢 Real Estate</option>
+            </select>
+          </div>
+          <div>
+            <label for="guidanceInput">Forward Guidance (optional)</label>
+            <textarea id="guidanceInput" placeholder="Paste forward-looking statements from the company's 10-K, earnings call, or investor deck..."></textarea>
+          </div>
+          <div>
+            <label for="tickerInput">Stock Ticker (optional)</label>
+            <input type="text" id="tickerInput" placeholder="e.g. SO, WMT, PFE"/>
+          </div>
+        </div>
+        <div>
+          <div class="section-label">Revenue Currency / Scale</div>
+          <div class="grid-2" style="margin-bottom:16px;">
+            <div>
+              <label for="currencySelect">Currency</label>
+              <select id="currencySelect">
+                <option value="$">USD ($)</option>
+                <option value="€">EUR (€)</option>
+                <option value="£">GBP (£)</option>
+                <option value="₹">INR (₹)</option>
+                <option value="¥">JPY (¥)</option>
+              </select>
+            </div>
+            <div>
+              <label for="scaleSelect">Scale</label>
+              <select id="scaleSelect">
+                <option value="M">Millions</option>
+                <option value="B">Billions</option>
+                <option value="K">Thousands</option>
+              </select>
+            </div>
+          </div>
+          <div id="sectorDriverPanel" style="display:none;">
+            <div class="section-label">Sector-Specific Drivers (latest year)</div>
+            <div id="sectorDriverFields" class="col-gap"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Historical data table -->
+      <div style="margin-top:28px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <div class="section-label" style="margin:0;">5-Year Historical Financials</div>
+          <div id="dataAlerts" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="data-table" id="historicalTable">
+            <thead>
+              <tr>
+                <th>Year</th>
+                <th>Revenue</th>
+                <th>COGS</th>
+                <th>Gross Profit</th>
+                <th>EBITDA</th>
+                <th>Net Income</th>
+                <th>EBITDA%</th>
+              </tr>
+            </thead>
+            <tbody id="histTableBody"></tbody>
+          </table>
+        </div>
+        <div id="cagrRow" style="margin-top:12px;display:flex;gap:12px;flex-wrap:wrap;"></div>
+      </div>
+    </div>
+    <div class="action-row">
+      <div class="spacer"></div>
+      <button class="btn btn-primary" id="step1Next" onclick="goStep(2)">Continue to Driver Formula →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====================================================
+     STEP 2 — DRIVER FORMULA
+===================================================== -->
+<div class="step-page" id="step2">
+  <div class="page-title">Driver <span>Formula</span></div>
+  <div class="page-subtitle">The formula governing your sector's revenue. Each variable's historical CAGR is computed from your data.</div>
+
+  <div class="panel" id="formulaPanel">
+    <!-- Rendered by JS -->
+  </div>
+
+  <div style="margin-top:24px;">
+    <div class="section-label">Historical CAGR by Driver</div>
+    <div class="grid-3" id="driverCagrCards"></div>
+  </div>
+
+  <div style="margin-top:24px;" id="knownFactsPanel">
+    <div class="section-label">Known Facts vs. Assumptions</div>
+    <div id="factsList" class="col-gap"></div>
+  </div>
+
+  <div class="action-row">
+    <button class="btn btn-ghost" onclick="goStep(1)">← Back</button>
+    <div class="spacer"></div>
+    <button class="btn btn-primary" onclick="goStep(3)">Set Assumptions →</button>
+  </div>
+</div>
+
+<!-- ====================================================
+     STEP 3 — ASSUMPTION SETTING
+===================================================== -->
+<div class="step-page" id="step3">
+  <div class="page-title">Assumption <span>Setting</span></div>
+  <div class="page-subtitle">Adjust growth rates per driver. Each assumption is sanity-checked against industry benchmarks. Distinguish facts from judgment calls.</div>
+
+  <div class="intro-card">
+    <div class="intro-icon">🔍</div>
+    <div>
+      <div style="font-size:0.88rem;font-weight:600;margin-bottom:4px;">Sanity-Check Active</div>
+      <div style="font-size:0.8rem;color:var(--text-secondary);">Assumptions significantly above/below sector norms are flagged. Toggle between <strong>Base</strong> values you're setting here and the <strong>Scenario</strong> overrides in Step 4.</div>
+    </div>
+  </div>
+
+  <div class="col-gap" id="assumptionDrivers"></div>
+
+  <div style="margin-top:24px;">
+    <div class="section-label">Assumption Summary</div>
+    <div id="assumptionSummaryTable"></div>
+  </div>
+
+  <div class="action-row">
+    <button class="btn btn-ghost" onclick="goStep(2)">← Back</button>
+    <div class="spacer"></div>
+    <button class="btn btn-primary" onclick="goStep(4)">Build Scenarios →</button>
+  </div>
+</div>
+
+<!-- ====================================================
+     STEP 4 — SCENARIO BUILDER
+===================================================== -->
+<div class="step-page" id="step4">
+  <div class="page-title">Scenario <span>Builder</span></div>
+  <div class="page-subtitle">Vary each driver independently across Bear / Base / Bull cases. Watch the Year-5 revenue update live as you adjust.</div>
+
+  <div class="scenarios-grid" id="scenarioGrid"></div>
+
+  <div style="margin-top:24px;">
+    <div class="section-label">Reasoning Chain — Year 5 Revenue Derivation</div>
+    <div id="reasoningChain" class="col-gap"></div>
+  </div>
+
+  <div class="action-row">
+    <button class="btn btn-ghost" onclick="goStep(3)">← Back</button>
+    <div class="spacer"></div>
+    <button class="btn btn-primary" onclick="buildForecast();goStep(5);">Generate 5-Year Forecast →</button>
+  </div>
+</div>
+
+<!-- ====================================================
+     STEP 5 — FORECAST OUTPUT DASHBOARD
+===================================================== -->
+<div class="step-page" id="step5">
+  <div class="page-title">5-Year <span>Forecast</span></div>
+  <div class="page-subtitle">Revenue, EBITDA, and Net Income projections across all three scenarios with driver-level justifications.</div>
+
+  <!-- Key metrics row -->
+  <div class="grid-3" id="kpiCards" style="margin-bottom:24px;"></div>
+
+  <!-- Fan chart -->
+  <div class="chart-wrap" style="margin-bottom:24px;">
+    <div class="section-label" style="margin-bottom:16px;">Revenue Fan Chart (Bear / Base / Bull)</div>
+    <canvas id="fanChart"></canvas>
+  </div>
+
+  <!-- Tabs: Revenue / EBITDA / Net Income -->
+  <div class="tab-row" id="forecastTabs">
+    <button class="tab active" onclick="showForecastTab('revenue',this)">Revenue</button>
+    <button class="tab" onclick="showForecastTab('ebitda',this)">EBITDA</button>
+    <button class="tab" onclick="showForecastTab('netincome',this)">Net Income</button>
+  </div>
+
+  <div class="panel" style="overflow-x:auto;margin-bottom:24px;">
+    <table class="forecast-table" id="forecastTable"></table>
+  </div>
+
+  <!-- Assumption cards -->
+  <div class="section-label">Assumption Cards — Driver Justifications</div>
+  <div class="grid-2" id="assumptionCards" style="margin-bottom:24px;"></div>
+
+  <!-- Narrative -->
+  <div class="section-label">Forecast Narrative</div>
+  <div class="narrative" id="narrativeBox"></div>
+
+  <!-- Disclaimer -->
+  <div class="disclaimer">
+    <div class="disclaimer-icon">⚠️</div>
+    <div><strong>Analytical Output — Not Investment Advice.</strong> Five-year forecasts carry wide uncertainty regardless of method. All inputs are either disclosed facts or judgment-based assumptions, as labeled. This output is informational only and should not be construed as a recommendation to buy, sell, or hold any security. Consult a qualified financial advisor before making investment decisions.</div>
+  </div>
+
+  <div class="action-row">
+    <button class="btn btn-ghost" onclick="goStep(4)">← Back</button>
+    <div class="spacer"></div>
+    <button class="btn btn-secondary" onclick="goStep(6)">Recalibrate with Actuals →</button>
+    <button class="btn btn-primary" onclick="window.print()">🖨️ Export</button>
+  </div>
+</div>
+
+<!-- ====================================================
+     STEP 6 — RECALIBRATION
+===================================================== -->
+<div class="step-page" id="step6">
+  <div class="page-title">Forecast <span>Recalibration</span></div>
+  <div class="page-subtitle">Enter actual results for a completed year to compare against the forecast. We'll decompose the variance by driver and suggest revised assumptions.</div>
+
+  <div class="panel" style="margin-bottom:24px;">
+    <div class="grid-2">
+      <div>
+        <label for="recalYear">Year to Compare</label>
+        <select id="recalYear" onchange="populateRecalForecast()">
+          <option value="1">Year 1</option>
+          <option value="2">Year 2</option>
+          <option value="3">Year 3</option>
+          <option value="4">Year 4</option>
+          <option value="5">Year 5</option>
+        </select>
+      </div>
+      <div>
+        <label>Scenario Used as Baseline</label>
+        <select id="recalScenario">
+          <option value="base">Base Case</option>
+          <option value="bear">Bear Case</option>
+          <option value="bull">Bull Case</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:20px;">
+      <div class="section-label">Actual Results</div>
+      <div class="grid-3">
+        <div>
+          <label for="actualRevenue">Actual Revenue</label>
+          <input type="number" id="actualRevenue" placeholder="0"/>
+        </div>
+        <div>
+          <label for="actualEbitda">Actual EBITDA</label>
+          <input type="number" id="actualEbitda" placeholder="0"/>
+        </div>
+        <div>
+          <label for="actualNI">Actual Net Income</label>
+          <input type="number" id="actualNI" placeholder="0"/>
+        </div>
+      </div>
+    </div>
+    <div class="action-row">
+      <div class="spacer"></div>
+      <button class="btn btn-primary" onclick="runRecalibration()">Analyze Variance</button>
+    </div>
+  </div>
+
+  <div id="recalResults" style="display:none;">
+    <div class="section-label">Variance Analysis</div>
+    <div class="recal-card" style="margin-bottom:20px;">
+      <div id="varianceRows"></div>
+    </div>
+    <div class="section-label">Driver-Level Explanation</div>
+    <div id="driverExplanation" class="col-gap" style="margin-bottom:20px;"></div>
+    <div class="section-label">Revised Assumption Suggestions</div>
+    <div id="revisedSuggestions" class="col-gap"></div>
+  </div>
+
+  <div class="action-row">
+    <button class="btn btn-ghost" onclick="goStep(5)">← Back to Forecast</button>
+    <div class="spacer"></div>
+    <button class="btn btn-secondary" onclick="goStep(1)">🔄 Start New Forecast</button>
+  </div>
+</div>
+
+</div><!-- /main -->
+
+<!-- ========= JAVASCRIPT ========= -->
+<script>
+'use strict';
+
+// =========================================================
+// STATE
+// =========================================================
+const state = {
+  currentStep: 1,
+  maxUnlocked: 1,
+  sector: '',
+  company: '',
+  currency: '$',
+  scale: 'M',
+  historicalData: [],        // [{year, revenue, cogs, ebitda, netIncome}]
+  sectorDrivers: {},         // key→value for sector-specific drivers
+  driverCAGRs: {},           // computed from historical
+  assumptions: {},           // driver→{value, badge, justification, source}
+  scenarios: {               // bear/base/bull overrides
+    bear: {}, base: {}, bull: {}
+  },
+  forecast: {                // {bear/base/bull: [{year,revenue,ebitda,netIncome}]}
+    bear: [], base: [], bull: []
+  },
+  fanChart: null,
+  activeTab: 'revenue'
+};
+
+// =========================================================
+// SECTOR DEFINITIONS
+// =========================================================
+const SECTORS = {
+  utilities: {
+    label: '⚡ Utilities',
+    formula: 'Revenue = Customer Count × Consumption per Customer × Rate per Unit',
+    drivers: [
+      {id:'customers', label:'Customer Count Growth (%/yr)', factBadge:'assumption',
+       default:1.5, min:-2, max:8, step:0.1,
+       justification:'Tied to population/housing growth in service territory.',
+       source:'User assumption — cross-check local housing starts & utility commission filings.',
+       benchmarkLow:0.5, benchmarkHigh:3.0,
+       benchmarkNote:'US utility customer count CAGR typically 0.5–3%/yr (EIA 2019–2023)'},
+      {id:'consumption', label:'Consumption per Customer (%/yr)', factBadge:'assumption',
+       default:-0.5, min:-4, max:4, step:0.1,
+       justification:'Real wildcard: efficiency gains vs. electrification/EV adoption.',
+       source:'User assumption — EIA efficiency trends suggest -1% to +1%/yr baseline.',
+       benchmarkLow:-2.0, benchmarkHigh:1.5,
+       benchmarkNote:'EIA data: residential kWh/customer trending -0.5 to -1.5%/yr with efficiency programs'},
+      {id:'rate', label:'Rate per Unit Growth (%/yr)', factBadge:'fact',
+       default:3.0, min:0, max:8, step:0.1,
+       justification:'State public utility commission (PUC) rate filings — often publicly scheduled years ahead.',
+       source:'FACT: Check state PUC rate case filings. US average retail electricity rate CAGR ~3%/yr (EIA).',
+       benchmarkLow:2.0, benchmarkHigh:5.0,
+       benchmarkNote:'US average retail electricity rate: ~3–4%/yr CAGR (EIA 2018–2023)'},
+    ],
+    cagrDrivers: ['revenue','ebitda','netIncome']
+  },
+  staples: {
+    label:'🛒 Consumer Staples / Retail',
+    formula:'Revenue = Store Count × Average Sales per Store (= Same-Store Sales + New Store Contribution)',
+    drivers: [
+      {id:'storeCount', label:'Store Count Growth (%/yr)', factBadge:'fact',
+       default:3.0, min:-5, max:15, step:0.1,
+       justification:"Driven by company's own stated expansion plans (investor day disclosures).",
+       source:'FACT (if disclosed): Check company investor day presentations, 10-K store count targets.',
+       benchmarkLow:0, benchmarkHigh:8,
+       benchmarkNote:'Large-cap grocery/staples store CAGR typically 1–5%/yr; discounters can reach 8%'},
+      {id:'sss', label:'Same-Store Sales Growth (%/yr)', factBadge:'assumption',
+       default:2.5, min:-5, max:10, step:0.1,
+       justification:'Inflation pass-through + foot traffic + basket size trends.',
+       source:'User assumption — NRF and company comp-sales guidance are primary references.',
+       benchmarkLow:0, benchmarkHigh:5,
+       benchmarkNote:'Mature grocery SSS: 1–3%/yr in normal environment; can spike with inflation'},
+      {id:'grossMargin', label:'Gross Margin Drift (pp/yr)', factBadge:'assumption',
+       default:0, min:-2, max:2, step:0.05,
+       justification:'Private label mix, shrink, supply-chain efficiency vs. input cost inflation.',
+       source:'User assumption — compare to peer gross margin trajectory.',
+       benchmarkLow:-0.5, benchmarkHigh:0.5,
+       benchmarkNote:'Staples gross margin typically very stable; ±0.5pp/yr is normal range'},
+    ],
+    cagrDrivers: ['revenue','ebitda','netIncome']
+  },
+  pharma: {
+    label:'💊 Pharmaceuticals',
+    formula:'Revenue = Σ (Prescription Volume × Price per Rx) per drug — adjusted for patent cliff erosion',
+    drivers: [
+      {id:'volumeGrowth', label:'Portfolio Volume Growth (%/yr)', factBadge:'assumption',
+       default:3.0, min:-10, max:15, step:0.1,
+       justification:'Market penetration, guideline changes, competitor approvals, aging demographics.',
+       source:'User assumption — check IQVIA market reports, company pipeline disclosures.',
+       benchmarkLow:-2, benchmarkHigh:8,
+       benchmarkNote:'Established pharma portfolio volume: 1–5%/yr absent patent cliff; major expiry can drop -10% to -30%'},
+      {id:'pricing', label:'Pricing Growth (%/yr)', factBadge:'assumption',
+       default:4.0, min:-10, max:12, step:0.1,
+       justification:'US net price increases; IRA negotiation impact; international price controls.',
+       source:'User assumption — IRA Inflation Reduction Act caps Medicare price growth; check company pricing history.',
+       benchmarkLow:-5, benchmarkHigh:8,
+       benchmarkNote:'US pharma net price CAGR ~3–6%/yr on-patent; IRA may limit to CPI for select drugs post-2026'},
+      {id:'patentErosion', label:'Patent Cliff Revenue Erosion (%/yr)', factBadge:'fact',
+       default:-2.0, min:-25, max:0, step:0.5,
+       justification:'Generic/biosimilar entry upon patent expiry. Dates are public record (FDA Orange Book).',
+       source:'FACT: FDA Orange Book expiry dates are definitive. Generic entry typically causes 50–90% volume loss.',
+       benchmarkLow:-15, benchmarkHigh:0,
+       benchmarkNote:'Major patent expiry: -10% to -30% impact on affected drug revenue within 2 years of loss of exclusivity'},
+    ],
+    cagrDrivers: ['revenue','ebitda','netIncome']
+  }
+};
+
+const UNSUPPORTED_REASONS = {
+  tech:        'Technology companies are driven by fast-moving adoption curves, competitive disruption, and platform network effects — these are trend-dependent and highly non-linear, making CAGR-based driver modeling unreliable for 5-year horizons.',
+  commodity:   'Commodity businesses are dominated by price cycles tied to global supply/demand and macro conditions (currency, geopolitics) that are fundamentally unpredictable using mechanical driver formulas.',
+  biotech:     'Early-stage biotech or clinical-trial-stage companies have binary outcomes: a drug either gets approved or it doesn\'t. Revenue before approval is near-zero; after approval it is a step-function — not a smooth CAGR. This sector requires probability-weighted DCF, not driver-based modeling.',
+  realestate:  'Real estate performance is highly sensitive to interest rates, cap-rate compression/expansion, and local market conditions — factors better modeled with explicit rate sensitivity analysis than a fixed driver formula.'
+};
+
+// =========================================================
+// INIT
+// =========================================================
+document.addEventListener('DOMContentLoaded', () => {
+  buildHistoricalTable();
+  document.getElementById('companyName').addEventListener('input', () => {
+    state.company = document.getElementById('companyName').value;
+  });
+  document.getElementById('currencySelect').addEventListener('change', e => state.currency = e.target.value);
+  document.getElementById('scaleSelect').addEventListener('change', e => state.scale = e.target.value);
+});
+
+// =========================================================
+// UTILITY
+// =========================================================
+function fmt(val, decimals=1){
+  if(val===null||val===undefined||isNaN(val)) return '—';
+  const abs = Math.abs(val);
+  if(abs>=1000) return (val/1000).toFixed(decimals)+'T';
+  return val.toFixed(decimals);
+}
+function fmtPct(v, decimals=1){ return (v>=0?'+':'')+v.toFixed(decimals)+'%'; }
+function fmtCurrency(v){
+  const s = state.currency||'$';
+  const sc = state.scale||'M';
+  return s+fmt(v)+sc;
+}
+
+function calcCAGR(start, end, years){
+  if(!start||start<=0||!end||years<=0) return null;
+  return (Math.pow(end/start, 1/years)-1)*100;
+}
+
+function applyCAGR(base, pctPerYear, years){
+  return base * Math.pow(1+pctPerYear/100, years);
+}
+
+// =========================================================
+// HISTORICAL TABLE
+// =========================================================
+function buildHistoricalTable(){
+  const tbody = document.getElementById('histTableBody');
+  tbody.innerHTML='';
+  const currentYear = new Date().getFullYear();
+  state.historicalData = [];
+  for(let i=4;i>=0;i--){
+    const yr = currentYear - i;
+    const row = {year:yr, revenue:null, cogs:null, ebitda:null, netIncome:null};
+    state.historicalData.push(row);
+    const tr = document.createElement('tr');
+    tr.innerHTML=`
+      <td class="col-year">${yr}</td>
+      <td><input type="number" placeholder="0" data-yr="${yr}" data-field="revenue" oninput="onHistInput(this)" min="0"/></td>
+      <td><input type="number" placeholder="0" data-yr="${yr}" data-field="cogs" oninput="onHistInput(this)" min="0"/></td>
+      <td class="gp-cell" id="gp-${yr}">—</td>
+      <td><input type="number" placeholder="0" data-yr="${yr}" data-field="ebitda" oninput="onHistInput(this)"/></td>
+      <td><input type="number" placeholder="0" data-yr="${yr}" data-field="netIncome" oninput="onHistInput(this)"/></td>
+      <td class="em-cell" id="em-${yr}">—</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+function onHistInput(el){
+  const yr = parseInt(el.dataset.yr);
+  const field = el.dataset.field;
+  const val = parseFloat(el.value)||null;
+  const row = state.historicalData.find(r=>r.year===yr);
+  if(row) row[field]=val;
+  computeGP(yr);
+  computeEM(yr);
+  validateData();
+  computeDriverCAGRs();
+}
+
+function computeGP(yr){
+  const row = state.historicalData.find(r=>r.year===yr);
+  const el = document.getElementById('gp-'+yr);
+  if(!el) return;
+  if(row&&row.revenue&&row.cogs) el.textContent=fmtCurrency(row.revenue-row.cogs);
+  else el.textContent='—';
+}
+function computeEM(yr){
+  const row = state.historicalData.find(r=>r.year===yr);
+  const el = document.getElementById('em-'+yr);
+  if(!el) return;
+  if(row&&row.revenue&&row.ebitda) el.textContent=((row.ebitda/row.revenue)*100).toFixed(1)+'%';
+  else el.textContent='—';
+}
+
+function validateData(){
+  const alerts = document.getElementById('dataAlerts');
+  alerts.innerHTML='';
+  const revenues = state.historicalData.map(r=>r.revenue).filter(v=>v!==null);
+  if(revenues.length<3){
+    alerts.innerHTML+='<span class="badge badge-warning">⚠ Need ≥3 years revenue</span>';
+  }
+  state.historicalData.forEach(r=>{
+    if(r.revenue&&r.ebitda&&r.ebitda>r.revenue){
+      alerts.innerHTML+=`<span class="badge badge-warning">⚠ ${r.year}: EBITDA > Revenue</span>`;
+    }
+    if(r.revenue&&r.revenue<0){
+      alerts.innerHTML+=`<span class="badge badge-warning">⚠ ${r.year}: Negative revenue</span>`;
+    }
+  });
+}
+
+function computeDriverCAGRs(){
+  const revs = state.historicalData.filter(r=>r.revenue).map(r=>r.revenue);
+  const ebitdas = state.historicalData.filter(r=>r.ebitda).map(r=>r.ebitda);
+  const nis = state.historicalData.filter(r=>r.netIncome).map(r=>r.netIncome);
+  state.driverCAGRs = {};
+  if(revs.length>=2) state.driverCAGRs.revenue = calcCAGR(revs[0],revs[revs.length-1],revs.length-1);
+  if(ebitdas.length>=2) state.driverCAGRs.ebitda = calcCAGR(ebitdas[0],ebitdas[ebitdas.length-1],ebitdas.length-1);
+  if(nis.length>=2) state.driverCAGRs.netIncome = calcCAGR(nis[0],nis[nis.length-1],nis.length-1);
+
+  const row = document.getElementById('cagrRow');
+  row.innerHTML='';
+  if(state.driverCAGRs.revenue!=null) row.innerHTML+=`<span class="cagr-chip">Rev CAGR ${fmtPct(state.driverCAGRs.revenue)}</span>`;
+  if(state.driverCAGRs.ebitda!=null) row.innerHTML+=`<span class="cagr-chip">EBITDA CAGR ${fmtPct(state.driverCAGRs.ebitda)}</span>`;
+  if(state.driverCAGRs.netIncome!=null) row.innerHTML+=`<span class="cagr-chip">NI CAGR ${fmtPct(state.driverCAGRs.netIncome)}</span>`;
+}
+
+// =========================================================
+// SECTOR CHANGE
+// =========================================================
+function onSectorChange(){
+  const val = document.getElementById('sectorSelect').value;
+  state.sector = val;
+  document.body.dataset.sector = val;
+
+  const guard = document.getElementById('sectorGuard');
+  const content = document.getElementById('step1Content');
+  const driverPanel = document.getElementById('sectorDriverPanel');
+
+  if(UNSUPPORTED_REASONS[val]){
+    guard.classList.add('visible');
+    content.style.display='none';
+    document.getElementById('guardBody').textContent = UNSUPPORTED_REASONS[val];
+  } else {
+    guard.classList.remove('visible');
+    content.style.display='';
+    if(SECTORS[val]){
+      driverPanel.style.display='block';
+      buildSectorDriverFields(val);
+    } else {
+      driverPanel.style.display='none';
+    }
+  }
+  // Update body glow
+  document.body.dataset.sector = (SECTORS[val]) ? val : 'utilities';
+}
+
+function clearSector(){
+  document.getElementById('sectorSelect').value='';
+  document.getElementById('sectorGuard').classList.remove('visible');
+  document.getElementById('step1Content').style.display='';
+  document.getElementById('sectorDriverPanel').style.display='none';
+  state.sector='';
+}
+
+function buildSectorDriverFields(sector){
+  const sec = SECTORS[sector];
+  if(!sec) return;
+  const cont = document.getElementById('sectorDriverFields');
+  cont.innerHTML='';
+  // For context — we'll also use these in step 3
+}
+
+// =========================================================
+// STEP NAVIGATION
+// =========================================================
+function goStep(n){
+  // Validate step 1 before leaving
+  if(state.currentStep===1 && n>1){
+    if(!state.sector||!SECTORS[state.sector]){
+      alert('Please select a supported sector before continuing.');return;
+    }
+    const revs = state.historicalData.filter(r=>r.revenue!==null);
+    if(revs.length<2){
+      alert('Please enter at least 2 years of revenue data.');return;
+    }
+    state.company = document.getElementById('companyName').value||'Your Company';
+    state.currency = document.getElementById('currencySelect').value;
+    state.scale = document.getElementById('scaleSelect').value;
+    computeDriverCAGRs();
+  }
+  if(n>state.maxUnlocked) state.maxUnlocked=n;
+  state.currentStep=n;
+  updateWizardBar();
+  document.querySelectorAll('.step-page').forEach((p,i)=>p.classList.toggle('active',i+1===n));
+  if(n===2) renderStep2();
+  if(n===3) renderStep3();
+  if(n===4) renderStep4();
+  if(n===5) buildForecast();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function jumpStep(n){
+  if(n<=state.maxUnlocked) goStep(n);
+}
+
+function updateWizardBar(){
+  for(let i=1;i<=6;i++){
+    const sc = document.getElementById('sc'+i);
+    const sn = sc.parentElement;
+    const con = document.getElementById('scon'+i);
+    sc.className='step-circle';
+    sn.className='step-node';
+    if(i<state.currentStep){ sc.classList.add('done'); sc.innerHTML='✓'; sn.classList.add('done'); if(con) con.classList.add('done'); }
+    else if(i===state.currentStep){ sc.classList.add('active'); sc.innerHTML=i; sn.classList.add('active'); }
+    else { sc.innerHTML=i; }
+  }
+}
+
+// =========================================================
+// STEP 2 — FORMULA DISPLAY
+// =========================================================
+function renderStep2(){
+  const sec = SECTORS[state.sector];
+  if(!sec) return;
+  const panel = document.getElementById('formulaPanel');
+
+  // Formula box
+  panel.innerHTML=`
+    <div class="section-label">Revenue Driver Formula — ${sec.label}</div>
+    <div class="formula-box" style="margin-top:12px;">
+      <span class="formula-accent">Revenue</span>
+      <span class="formula-op"> = </span>
+      ${formatFormula(state.sector)}
+    </div>
+    <div style="margin-top:16px;font-size:0.82rem;color:var(--text-secondary);line-height:1.7;">
+      ${getFormulaExplanation(state.sector)}
+    </div>
+  `;
+
+  // CAGR cards
+  const cagrCont = document.getElementById('driverCagrCards');
+  cagrCont.innerHTML='';
+  const metrics = [
+    {label:'Revenue CAGR', val:state.driverCAGRs.revenue},
+    {label:'EBITDA CAGR', val:state.driverCAGRs.ebitda},
+    {label:'Net Income CAGR', val:state.driverCAGRs.netIncome},
+  ];
+  metrics.forEach(m=>{
+    const v = m.val;
+    const color = v==null?'var(--text-dim)':v>=0?'var(--bull)':'var(--bear)';
+    cagrCont.innerHTML+=`
+      <div class="driver-card">
+        <div class="driver-name">${m.label}</div>
+        <div style="font-size:1.8rem;font-weight:800;font-family:'JetBrains Mono',monospace;color:${color}">
+          ${v!=null?fmtPct(v):'No data'}
+        </div>
+        <div style="font-size:0.75rem;color:var(--text-dim);">5-year historical average (from your data)</div>
+      </div>`;
+  });
+
+  // Facts vs assumptions
+  const factsList = document.getElementById('factsList');
+  factsList.innerHTML='';
+  sec.drivers.forEach(d=>{
+    const isFact = d.factBadge==='fact';
+    factsList.innerHTML+=`
+      <div style="display:flex;align-items:flex-start;gap:16px;padding:14px 0;border-bottom:1px solid var(--border);">
+        <span class="badge ${isFact?'badge-fact':'badge-assumption'}">${isFact?'✓ FACT':'~ ASSUMPTION'}</span>
+        <div>
+          <div style="font-size:0.85rem;font-weight:600;margin-bottom:4px;">${d.label}</div>
+          <div style="font-size:0.78rem;color:var(--text-secondary);">${d.justification}</div>
+          <div style="font-size:0.72rem;color:var(--text-dim);margin-top:4px;font-style:italic;">${d.source}</div>
+        </div>
+      </div>`;
+  });
+}
+
+function formatFormula(sector){
+  if(sector==='utilities') return `<span class="formula-accent">Customer Count</span> <span class="formula-op">×</span> <span class="formula-accent">Consumption/Customer</span> <span class="formula-op">×</span> <span class="formula-accent">Rate/Unit</span>`;
+  if(sector==='staples')  return `<span class="formula-accent">Store Count</span> <span class="formula-op">×</span> <span class="formula-accent">Same-Store Sales</span> <span class="formula-op">+</span> <span class="formula-accent">New-Store Contribution</span>`;
+  if(sector==='pharma')   return `<span class="formula-op">Σ (</span><span class="formula-accent">Rx Volume</span> <span class="formula-op">×</span> <span class="formula-accent">Price/Rx</span><span class="formula-op">)</span> <span class="formula-op">−</span> <span class="formula-accent">Patent Cliff Erosion</span>`;
+  return '';
+}
+
+function getFormulaExplanation(sector){
+  const expl = {
+    utilities:`<strong>Customer Count</strong> grows with population and housing development in the utility's service territory — typically the slowest-moving driver. <strong>Consumption per customer</strong> is the wildcard: efficiency programs, EV penetration, weather, and economic activity all pull in different directions. <strong>Rate per unit</strong> is the most predictable input — state Public Utility Commission rate filings are often published years in advance.`,
+    staples:`<strong>Store count growth</strong> is largely within management's control and is explicitly disclosed at investor days and in 10-K filings. <strong>Same-store sales (SSS)</strong> captures inflation pass-through, foot traffic, and basket size changes. The new-store contribution adds an uplift proportional to the fraction of stores that opened partway through the year.`,
+    pharma:`Each drug's revenue is the product of prescription volume and net price per prescription. On-patent drugs can grow through penetration and price increases. Off-patent drugs face generic/biosimilar entry that can erase 50–90% of volume. Aggregate portfolio revenue requires drug-by-drug analysis, but we model it via portfolio-level growth rates adjusted for the known patent cliff.`
+  };
+  return expl[sector]||'';
+}
+
+// =========================================================
+// STEP 3 — ASSUMPTIONS
+// =========================================================
+function initAssumptions(){
+  const sec = SECTORS[state.sector];
+  if(!sec) return;
+  sec.drivers.forEach(d=>{
+    if(!state.assumptions[d.id]){
+      state.assumptions[d.id]={
+        value: d.default,
+        badge: d.factBadge,
+        justification: d.justification,
+        source: d.source
+      };
+    }
+    // Init base scenario
+    if(!state.scenarios.base[d.id]) state.scenarios.base[d.id]=d.default;
+    if(!state.scenarios.bear[d.id]) state.scenarios.bear[d.id]=d.default*0.6;
+    if(!state.scenarios.bull[d.id]) state.scenarios.bull[d.id]=d.default*1.4;
+  });
+}
+
+function renderStep3(){
+  initAssumptions();
+  const sec = SECTORS[state.sector];
+  if(!sec) return;
+  const cont = document.getElementById('assumptionDrivers');
+  cont.innerHTML='';
+
+  sec.drivers.forEach(d=>{
+    const val = state.assumptions[d.id]?.value??d.default;
+    const isFact = d.factBadge==='fact';
+    const isOutlier = checkOutlier(d,val);
+
+    const card = document.createElement('div');
+    card.className='driver-card';
+    card.innerHTML=`
+      <div class="driver-card-header">
+        <div>
+          <div class="driver-name">${d.label}</div>
+          <div class="driver-cagr">Historical Revenue CAGR: ${state.driverCAGRs.revenue!=null?fmtPct(state.driverCAGRs.revenue):'—'}</div>
+        </div>
+        <span class="badge ${isFact?'badge-fact':'badge-assumption'}">${isFact?'✓ FACT':'~ ASSUMPTION'}</span>
+      </div>
+      <div class="slider-row">
+        <input type="range" id="slider_${d.id}" min="${d.min}" max="${d.max}" step="${d.step}" value="${val}"
+          oninput="onAssumptionChange('${d.id}',parseFloat(this.value))"/>
+        <div class="slider-val" id="slval_${d.id}">${fmtPct(val)}</div>
+        <input type="number" id="num_${d.id}" value="${val}" step="${d.step}"
+          style="width:80px;text-align:right;"
+          oninput="onAssumptionChange('${d.id}',parseFloat(this.value))"/>
+      </div>
+      <div style="font-size:0.75rem;color:var(--text-dim);">Benchmark range: ${d.benchmarkLow}% – ${d.benchmarkHigh}% &nbsp;·&nbsp; ${d.benchmarkNote}</div>
+      ${isOutlier?`<div class="alert alert-warn">⚠️ ${val>d.benchmarkHigh?'Above':'Below'} typical sector benchmark (${d.benchmarkLow}%–${d.benchmarkHigh}%). Please verify this assumption.</div>`:''}
+      <div style="font-size:0.78rem;color:var(--text-secondary);">${d.justification}</div>
+      <div style="font-size:0.72rem;color:var(--text-dim);font-style:italic;">${d.source}</div>
+    `;
+    cont.appendChild(card);
+  });
+  renderAssumptionSummary();
+}
+
+function checkOutlier(d, val){
+  return val<d.benchmarkLow||val>d.benchmarkHigh;
+}
+
+function onAssumptionChange(id, val){
+  if(isNaN(val)) return;
+  state.assumptions[id]={...state.assumptions[id], value:val};
+  state.scenarios.base[id]=val;
+  const el = document.getElementById('slval_'+id);
+  if(el) el.textContent=fmtPct(val);
+  const sliderEl = document.getElementById('slider_'+id);
+  if(sliderEl) sliderEl.value=val;
+  const numEl = document.getElementById('num_'+id);
+  if(numEl) numEl.value=val;
+  renderAssumptionSummary();
+}
+
+function renderAssumptionSummary(){
+  const sec = SECTORS[state.sector];
+  if(!sec) return;
+  const cont = document.getElementById('assumptionSummaryTable');
+  let html=`<table class="data-table"><thead><tr>
+    <th>Driver</th><th>Your Assumption</th><th>Benchmark Range</th><th>Status</th>
+  </tr></thead><tbody>`;
+  sec.drivers.forEach(d=>{
+    const val = state.assumptions[d.id]?.value??d.default;
+    const isOut = checkOutlier(d,val);
+    html+=`<tr>
+      <td>${d.label}</td>
+      <td class="cagr-chip" style="font-family:'JetBrains Mono',monospace;">${fmtPct(val)}</td>
+      <td style="color:var(--text-secondary);">${d.benchmarkLow}% – ${d.benchmarkHigh}%</td>
+      <td><span class="badge ${isOut?'badge-warning':'badge-info'}">${isOut?'⚠ Review':'✓ OK'}</span></td>
+    </tr>`;
+  });
+  html+=`</tbody></table>`;
+  cont.innerHTML=html;
+}
+
+// =========================================================
+// STEP 4 — SCENARIO BUILDER
+// =========================================================
+function renderStep4(){
+  initAssumptions();
+  const sec = SECTORS[state.sector];
+  if(!sec) return;
+
+  // Default scenario spreads
+  sec.drivers.forEach(d=>{
+    const base = state.assumptions[d.id]?.value??d.default;
+    if(state.scenarios.base[d.id]===undefined) state.scenarios.base[d.id]=base;
+    if(state.scenarios.bear[d.id]===undefined) state.scenarios.bear[d.id]=Math.max(d.min, base-(Math.abs(base*0.5)||1));
+    if(state.scenarios.bull[d.id]===undefined) state.scenarios.bull[d.id]=Math.min(d.max, base+(Math.abs(base*0.5)||1));
+  });
+
+  const grid = document.getElementById('scenarioGrid');
+  grid.innerHTML='';
+
+  ['bear','base','bull'].forEach(sc=>{
+    const labels = {bear:'🐻 Bear Case',base:'📊 Base Case',bull:'🐂 Bull Case'};
+    const descs  = {
+      bear:'Conservative — each driver at its pessimistic bound.',
+      base:'Central — your stated assumptions.',
+      bull:'Optimistic — each driver at its favorable bound.'
+    };
+    const col = document.createElement('div');
+    col.className=`scenario-col ${sc}`;
+    col.id=`scol_${sc}`;
+
+    let driverHTML='';
+    sec.drivers.forEach(d=>{
+      const v = state.scenarios[sc][d.id]??d.default;
+      driverHTML+=`
+        <div style="margin-top:12px;">
+          <label style="font-size:0.75rem;">${d.label}</label>
+          <div class="slider-row">
+            <input type="range" min="${d.min}" max="${d.max}" step="${d.step}" value="${v}"
+              id="scslider_${sc}_${d.id}"
+              oninput="onScenarioChange('${sc}','${d.id}',parseFloat(this.value))"/>
+            <div class="slider-val" id="scval_${sc}_${d.id}">${fmtPct(v)}</div>
+          </div>
+        </div>`;
+    });
+
+    col.innerHTML=`
+      <div class="scenario-title">${labels[sc]}</div>
+      <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:8px;">${descs[sc]}</div>
+      <div class="scenario-rev-label">Projected Year-5 Revenue</div>
+      <div class="scenario-rev" id="screv5_${sc}">—</div>
+      ${driverHTML}
+    `;
+    grid.appendChild(col);
+  });
+
+  updateScenarioRevs();
+  renderReasoningChain();
+}
+
+function onScenarioChange(sc, driverId, val){
+  if(isNaN(val)) return;
+  state.scenarios[sc][driverId]=val;
+  document.getElementById(`scval_${sc}_${driverId}`).textContent=fmtPct(val);
+  updateScenarioRevs();
+  renderReasoningChain();
+}
+
+function computeYear5Revenue(scenarioName){
+  const latestRev = getLatestRevenue();
+  if(!latestRev) return null;
+  const sc = state.scenarios[scenarioName];
+  const sec = SECTORS[state.sector];
+  let totalPctGrowth=0;
+  if(state.sector==='utilities'){
+    const c=sc.customers??1.5, co=sc.consumption??-0.5, r=sc.rate??3.0;
+    totalPctGrowth=c+co+r; // approximate additive (compounding done in buildForecast)
+  } else if(state.sector==='staples'){
+    const st=sc.storeCount??3.0, ss=sc.sss??2.5;
+    totalPctGrowth=st+ss;
+  } else if(state.sector==='pharma'){
+    const v=sc.volumeGrowth??3.0, p=sc.pricing??4.0, e=sc.patentErosion??-2.0;
+    totalPctGrowth=v+p+e;
+  }
+  return applyCAGR(latestRev, totalPctGrowth, 5);
+}
+
+function updateScenarioRevs(){
+  ['bear','base','bull'].forEach(sc=>{
+    const rev5 = computeYear5Revenue(sc);
+    const el = document.getElementById(`screv5_${sc}`);
+    if(el) el.textContent=rev5?fmtCurrency(rev5):'—';
+  });
+}
+
+function renderReasoningChain(){
+  const cont = document.getElementById('reasoningChain');
+  cont.innerHTML='';
+  const sec = SECTORS[state.sector];
+  if(!sec) return;
+
+  ['bear','base','bull'].forEach(sc=>{
+    const latestRev=getLatestRevenue();
+    const rev5=computeYear5Revenue(sc);
+    const colors={bear:'var(--bear)',base:'var(--base)',bull:'var(--bull)'};
+    let driverLines='';
+    sec.drivers.forEach(d=>{
+      const v=state.scenarios[sc][d.id]??d.default;
+      driverLines+=`<div style="font-size:0.8rem;color:var(--text-secondary);padding:4px 0;">
+        → <strong>${d.label}</strong>: ${fmtPct(v)}/yr over 5 years
+      </div>`;
+    });
+    cont.innerHTML+=`
+      <div class="assumption-card">
+        <div class="assumption-name" style="color:${colors[sc]};">${sc.charAt(0).toUpperCase()+sc.slice(1)} Case</div>
+        ${driverLines}
+        <div style="font-size:0.82rem;margin-top:8px;">
+          Base: <strong>${fmtCurrency(latestRev||0)}</strong>
+          → Year 5: <strong style="color:${colors[sc]};">${rev5?fmtCurrency(rev5):'—'}</strong>
+          (${latestRev&&rev5?fmtPct(((rev5/latestRev)-1)*100)+' total':''})
+        </div>
+      </div>`;
+  });
+}
+
+function getLatestRevenue(){
+  const data = state.historicalData.filter(r=>r.revenue!==null);
+  if(!data.length) return null;
+  return data[data.length-1].revenue;
+}
+function getLatestEbitda(){
+  const data = state.historicalData.filter(r=>r.ebitda!==null);
+  if(!data.length) return null;
+  return data[data.length-1].ebitda;
+}
+function getLatestNI(){
+  const data = state.historicalData.filter(r=>r.netIncome!==null);
+  if(!data.length) return null;
+  return data[data.length-1].netIncome;
+}
+
+// =========================================================
+// STEP 5 — BUILD FORECAST
+// =========================================================
+function buildForecast(){
+  const latestRev = getLatestRevenue()||100;
+  const latestEbitda = getLatestEbitda()||latestRev*0.2;
+  const latestNI = getLatestNI()||latestRev*0.1;
+  const sec = SECTORS[state.sector];
+  if(!sec) return;
+
+  ['bear','base','bull'].forEach(scenarioName=>{
+    state.forecast[scenarioName]=[];
+    const sc = state.scenarios[scenarioName];
+    let revGrowthPct, ebitdaDrift, niDrift;
+
+    if(state.sector==='utilities'){
+      revGrowthPct=(sc.customers??1.5)+(sc.consumption??-0.5)+(sc.rate??3.0);
+      ebitdaDrift=(sc.rate??3.0)*0.4; // regulated returns tied to rate
+      niDrift=ebitdaDrift-1;
+    } else if(state.sector==='staples'){
+      revGrowthPct=(sc.storeCount??3.0)+(sc.sss??2.5);
+      const gmDrift=sc.grossMargin??0;
+      ebitdaDrift=revGrowthPct*0.5+gmDrift;
+      niDrift=ebitdaDrift*0.7;
+    } else {
+      revGrowthPct=(sc.volumeGrowth??3.0)+(sc.pricing??4.0)+(sc.patentErosion??-2.0);
+      ebitdaDrift=revGrowthPct*0.6+(sc.pricing??4.0)*0.2;
+      niDrift=ebitdaDrift*0.65;
+    }
+
+    const baseEbitdaMargin = latestRev>0?(latestEbitda/latestRev):0.2;
+    for(let yr=1;yr<=5;yr++){
+      const rev = applyCAGR(latestRev, revGrowthPct, yr);
+      const ebitdaMarginNow = Math.min(0.55,Math.max(0.05,baseEbitdaMargin+ebitdaDrift/100*yr));
+      const ebitda = rev*ebitdaMarginNow;
+      const niMargin = Math.max(-0.15,Math.min(0.35,(latestNI/latestRev||0.1)+niDrift/100*yr));
+      const netIncome = rev*niMargin;
+      state.forecast[scenarioName].push({year:yr, revenue:rev, ebitda, netIncome});
+    }
+  });
+
+  renderForecastStep();
+}
+
+function renderForecastStep(){
+  renderKPICards();
+  renderFanChart();
+  showForecastTab('revenue', document.querySelector('#forecastTabs .tab.active'));
+  renderAssumptionCards();
+  renderNarrative();
+}
+
+function renderKPICards(){
+  const cont = document.getElementById('kpiCards');
+  const base5 = state.forecast.base[4];
+  const bear5 = state.forecast.bear[4];
+  const bull5 = state.forecast.bull[4];
+  const latestRev=getLatestRevenue()||1;
+  cont.innerHTML=`
+    <div class="metric-card">
+      <div class="metric-label">Base Case — Year 5 Revenue</div>
+      <div class="metric-val">${fmtCurrency(base5.revenue)}</div>
+      <div style="font-size:0.75rem;color:var(--bull);margin-top:4px;">${fmtPct(((base5.revenue/latestRev)-1)*100)} total growth</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Revenue Range (Bear–Bull)</div>
+      <div class="metric-val" style="font-size:1.1rem;">${fmtCurrency(bear5.revenue)} – ${fmtCurrency(bull5.revenue)}</div>
+      <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:4px;">Year 5 uncertainty band</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Base Case — Year 5 EBITDA</div>
+      <div class="metric-val">${fmtCurrency(base5.ebitda)}</div>
+      <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:4px;">${((base5.ebitda/base5.revenue)*100).toFixed(1)}% margin</div>
+    </div>
+  `;
+}
+
+function renderFanChart(){
+  const ctx=document.getElementById('fanChart').getContext('2d');
+  if(state.fanChart) state.fanChart.destroy();
+  const labels=['Year 0','Year 1','Year 2','Year 3','Year 4','Year 5'];
+  const base0=getLatestRevenue()||100;
+  const bearData=[base0,...state.forecast.bear.map(r=>r.revenue)];
+  const baseData=[base0,...state.forecast.base.map(r=>r.revenue)];
+  const bullData=[base0,...state.forecast.bull.map(r=>r.revenue)];
+  state.fanChart=new Chart(ctx,{
+    type:'line',
+    data:{
+      labels,
+      datasets:[
+        {label:'Bull Case',data:bullData,borderColor:'#34d399',backgroundColor:'rgba(52,211,153,0.08)',borderWidth:2,pointRadius:4,tension:0.35},
+        {label:'Base Case',data:baseData,borderColor:'#60a5fa',backgroundColor:'rgba(96,165,250,0.08)',borderWidth:2.5,pointRadius:5,tension:0.35},
+        {label:'Bear Case',data:bearData,borderColor:'#f87171',backgroundColor:'rgba(248,113,113,0.08)',borderWidth:2,pointRadius:4,tension:0.35},
+      ]
+    },
+    options:{
+      responsive:true,
+      plugins:{
+        legend:{labels:{color:'#8b98b8',font:{family:'Inter'}}},
+        tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${fmtCurrency(ctx.parsed.y)}`}}
+      },
+      scales:{
+        x:{grid:{color:'rgba(255,255,255,0.05)'},ticks:{color:'#8b98b8'}},
+        y:{grid:{color:'rgba(255,255,255,0.05)'},ticks:{color:'#8b98b8',callback:v=>state.currency+fmt(v)+state.scale}}
+      }
+    }
+  });
+}
+
+function showForecastTab(tab, btn){
+  state.activeTab=tab;
+  document.querySelectorAll('#forecastTabs .tab').forEach(t=>t.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  const table=document.getElementById('forecastTable');
+  const field = {revenue:'revenue',ebitda:'ebitda',netincome:'netIncome'}[tab];
+  let html=`<thead><tr>
+    <th>Year</th>
+    <th class="bear-val">🐻 Bear</th>
+    <th class="base-val">📊 Base</th>
+    <th class="bull-val">🐂 Bull</th>
+    <th style="color:var(--text-secondary);">Base vs Prior Yr</th>
+  </tr></thead><tbody>`;
+  state.forecast.base.forEach((_,i)=>{
+    const yr=i+1;
+    const bear=state.forecast.bear[i][field];
+    const base=state.forecast.base[i][field];
+    const bull=state.forecast.bull[i][field];
+    const prior = i===0?(getLatestRevenue()||0):state.forecast.base[i-1][field];
+    const delta = prior>0?((base/prior)-1)*100:0;
+    html+=`<tr>
+      <td class="year-col">Year ${yr}</td>
+      <td class="bear-val">${fmtCurrency(bear)}</td>
+      <td class="base-val">${fmtCurrency(base)}</td>
+      <td class="bull-val">${fmtCurrency(bull)}</td>
+      <td style="color:${delta>=0?'var(--bull)':'var(--bear)'};">${fmtPct(delta)}</td>
+    </tr>`;
+  });
+  html+='</tbody>';
+  table.innerHTML=html;
+}
+
+function renderAssumptionCards(){
+  const sec = SECTORS[state.sector];
+  if(!sec) return;
+  const cont = document.getElementById('assumptionCards');
+  cont.innerHTML='';
+  sec.drivers.forEach(d=>{
+    const val=state.assumptions[d.id]?.value??d.default;
+    const isFact=d.factBadge==='fact';
+    cont.innerHTML+=`
+      <div class="assumption-card">
+        <div class="assumption-name">
+          ${d.label}
+          <span class="badge ${isFact?'badge-fact':'badge-assumption'}">${isFact?'✓ FACT':'~ ASSUMPTION'}</span>
+        </div>
+        <div class="assumption-val">${fmtPct(val)}/yr</div>
+        <div class="assumption-justification">${d.justification}</div>
+        <div class="assumption-source">Source: ${d.source}</div>
+      </div>`;
+  });
+}
+
+function renderNarrative(){
+  const sec = SECTORS[state.sector];
+  const company = state.company||'The company';
+  const base5 = state.forecast.base[4];
+  const latestRev = getLatestRevenue()||100;
+  const totalGrowth = ((base5.revenue/latestRev)-1)*100;
+
+  let narrative='';
+  if(state.sector==='utilities'){
+    const c=state.scenarios.base.customers??1.5, co=state.scenarios.base.consumption??-0.5, r=state.scenarios.base.rate??3.0;
+    narrative=`Under the base case, <strong>${company}</strong> is projected to grow revenue from <strong>${fmtCurrency(latestRev)}</strong> to <strong>${fmtCurrency(base5.revenue)}</strong> over five years — a <strong>${fmtPct(totalGrowth)}</strong> cumulative gain. 
+    The primary growth engine is <strong>rate increases of ${fmtPct(r)}/yr</strong>, which are partially offset by <strong>consumption efficiency declining ${fmtPct(co)}/yr</strong> per customer. 
+    Customer count growth of <strong>${fmtPct(c)}/yr</strong> provides a stable base, tied to service-territory population dynamics. 
+    Growth is steady and regulated — acceleration would require a favorable rate case ruling; deceleration would stem from efficiency-driven demand destruction.`;
+  } else if(state.sector==='staples'){
+    const st=state.scenarios.base.storeCount??3, ss=state.scenarios.base.sss??2.5;
+    narrative=`Under the base case, <strong>${company}</strong> is projected to grow revenue to <strong>${fmtCurrency(base5.revenue)}</strong> over five years (<strong>${fmtPct(totalGrowth)}</strong> cumulative). 
+    <strong>Store count expansion of ${fmtPct(st)}/yr</strong> is the dominant driver, reflecting the company's own disclosed capital deployment plans. 
+    <strong>Same-store sales growth of ${fmtPct(ss)}/yr</strong> underpins organic performance, driven by inflation pass-through and modest volume gains. 
+    Growth would accelerate in a bull case if new stores ramp faster than historical averages, or decelerate in a bear case if SSS turns negative under consumer spending pressure.`;
+  } else if(state.sector==='pharma'){
+    const v=state.scenarios.base.volumeGrowth??3, p=state.scenarios.base.pricing??4, e=state.scenarios.base.patentErosion??-2;
+    narrative=`Under the base case, <strong>${company}</strong>'s established drug portfolio is projected to reach <strong>${fmtCurrency(base5.revenue)}</strong> in Year 5 (<strong>${fmtPct(totalGrowth)}</strong> cumulative). 
+    <strong>On-patent volume growth of ${fmtPct(v)}/yr</strong> reflects penetration and demographic tailwinds. 
+    <strong>Net pricing gains of ${fmtPct(p)}/yr</strong> are meaningful but face headwinds from IRA drug-price negotiation mechanisms post-2026. 
+    The patent cliff creates a <strong>${fmtPct(e)}/yr headwind</strong> as select drugs lose exclusivity — this is treated as a near-fact based on FDA Orange Book expiry dates. 
+    The bull case assumes pipeline approvals add step-change revenue; the bear case assumes larger-than-expected generic erosion.`;
+  }
+  document.getElementById('narrativeBox').innerHTML=narrative;
+}
+
+// =========================================================
+// STEP 6 — RECALIBRATION
+// =========================================================
+function populateRecalForecast(){
+  // just clear results when year changes
+  document.getElementById('recalResults').style.display='none';
+}
+
+function runRecalibration(){
+  const yr = parseInt(document.getElementById('recalYear').value)||1;
+  const scenarioName = document.getElementById('recalScenario').value;
+  const actualRev = parseFloat(document.getElementById('actualRevenue').value)||null;
+  const actualEbitda = parseFloat(document.getElementById('actualEbitda').value)||null;
+  const actualNI = parseFloat(document.getElementById('actualNI').value)||null;
+
+  if(!actualRev){ alert('Please enter at least actual revenue.'); return; }
+
+  const forecastYr = state.forecast[scenarioName][yr-1];
+  if(!forecastYr){ alert('No forecast data. Please complete Steps 1–5 first.'); return; }
+
+  const sec = SECTORS[state.sector];
+  const cont = document.getElementById('varianceRows');
+  const metrics = [
+    {label:'Revenue', forecast:forecastYr.revenue, actual:actualRev},
+    {label:'EBITDA', forecast:forecastYr.ebitda, actual:actualEbitda},
+    {label:'Net Income', forecast:forecastYr.netIncome, actual:actualNI},
+  ];
+
+  cont.innerHTML='';
+  metrics.forEach(m=>{
+    if(m.actual===null) return;
+    const delta=m.actual-m.forecast;
+    const pct=m.forecast>0?((m.actual/m.forecast)-1)*100:0;
+    cont.innerHTML+=`
+      <div class="variance-row">
+        <span class="var-label">${m.label}</span>
+        <span class="var-forecast">${fmtCurrency(m.forecast)} (forecast)</span>
+        <span class="var-actual">${fmtCurrency(m.actual)} (actual)</span>
+        <span class="var-delta ${delta>=0?'pos':'neg'}">${fmtPct(pct)} ${delta>=0?'▲':'▼'}</span>
+      </div>`;
+  });
+
+  // Driver explanations
+  const revDelta = actualRev-forecastYr.revenue;
+  const pctMiss = forecastYr.revenue>0?((actualRev/forecastYr.revenue)-1)*100:0;
+  const expCont = document.getElementById('driverExplanation');
+  expCont.innerHTML='';
+
+  if(sec){
+    sec.drivers.forEach(d=>{
+      const assumed = state.scenarios[scenarioName][d.id]??d.default;
+      let impliedImpact='';
+      if(state.sector==='utilities'){
+        if(d.id==='consumption'&&pctMiss<-2) impliedImpact=`Consumption per customer likely declined faster than ${fmtPct(assumed)}/yr — check weather-normalized demand data.`;
+        else if(d.id==='rate') impliedImpact=`Rate assumption of ${fmtPct(assumed)}/yr — verify against published tariff schedules.`;
+        else if(d.id==='customers') impliedImpact=`Customer count growth of ${fmtPct(assumed)}/yr — compare to disclosed customer count in latest earnings.`;
+      } else if(state.sector==='staples'){
+        if(d.id==='sss'&&pctMiss<-1) impliedImpact=`Same-store sales may have underperformed assumed ${fmtPct(assumed)}/yr — macro consumer pressure?`;
+        else if(d.id==='storeCount') impliedImpact=`Store count growth of ${fmtPct(assumed)}/yr — check actual net new store openings disclosed.`;
+        else impliedImpact=`Gross margin drift assumed ${fmtPct(assumed)}pp — check reported gross margin vs. prior year.`;
+      } else {
+        if(d.id==='pricing'&&pctMiss<0) impliedImpact=`Net pricing realization of ${fmtPct(assumed)}/yr may have been compressed by payer rebates or IRA adjustments.`;
+        else if(d.id==='volumeGrowth') impliedImpact=`Volume growth assumed ${fmtPct(assumed)}/yr — compare to reported prescription volume or unit sales.`;
+        else impliedImpact=`Patent cliff erosion assumed ${fmtPct(assumed)}/yr — verify against actual generic market share data.`;
+      }
+      expCont.innerHTML+=`
+        <div class="assumption-card">
+          <div class="assumption-name">${d.label}</div>
+          <div class="assumption-val">${fmtPct(assumed)}/yr assumed</div>
+          <div class="assumption-justification">${impliedImpact||'No specific variance driver identified for this assumption at this deviation level.'}</div>
+        </div>`;
+    });
+  }
+
+  // Revised suggestions
+  const sugCont = document.getElementById('revisedSuggestions');
+  sugCont.innerHTML='';
+  const revScale = forecastYr.revenue>0?actualRev/forecastYr.revenue:1;
+  const impliedGrowth = revScale<1?-2:2; // crude implied revision
+  sugCont.innerHTML+=`
+    <div class="alert ${pctMiss>=0?'alert-success':'alert-warn'}">
+      <strong>${pctMiss>=0?'✅ Outperformance':'⚠️ Underperformance'} of ${Math.abs(pctMiss).toFixed(1)}%</strong> vs. ${scenarioName} case.
+      Suggested action: ${pctMiss<-5?`Revise growth assumptions down by ~${Math.abs(pctMiss/5).toFixed(1)} pp/yr to reflect realized trajectory.`:
+      pctMiss>5?`Growth is tracking above base case — consider revising up by ~${(pctMiss/5).toFixed(1)} pp/yr or reviewing bull-case assumptions.`:
+      'Variance within normal range — base case assumptions remain defensible.'} 
+    </div>
+    <div class="assumption-card" style="margin-top:8px;">
+      <div class="assumption-justification">
+        Return to <strong>Step 3</strong> to adjust your driver assumptions, then regenerate the forecast in <strong>Step 4–5</strong> with updated inputs.
+        Anchor revisions to specific driver evidence (e.g., disclosed customer count, published tariff, reported Rx volume) rather than fitting to a top-line miss alone.
+      </div>
+    </div>`;
+
+  document.getElementById('recalResults').style.display='block';
+}
+
+// =========================================================
+// DEMO DATA (for quick testing)
+// =========================================================
+window.loadDemo = function(){
+  // Auto-fill a utilities demo
+  document.getElementById('companyName').value='Southern Company (Demo)';
+  document.getElementById('sectorSelect').value='utilities';
+  onSectorChange();
+  document.getElementById('tickerInput').value='SO';
+  document.getElementById('guidanceInput').value='Management guidance: 5-7% long-term earnings growth per share, driven by capital investment in grid modernization.';
+
+  const demoRevs = [24000,24800,25600,26500,27200];
+  const demoCOGS = [16800,17360,17920,18550,19040];
+  const demoEBITDA = [5800,5900,6100,6300,6500];
+  const demoNI = [2400,2500,2550,2650,2720];
+  const rows = document.querySelectorAll('#histTableBody tr');
+  rows.forEach((tr,i)=>{
+    tr.querySelectorAll('input[type=number]').forEach(inp=>{
+      const field=inp.dataset.field;
+      if(field==='revenue') inp.value=demoRevs[i];
+      if(field==='cogs') inp.value=demoCOGS[i];
+      if(field==='ebitda') inp.value=demoEBITDA[i];
+      if(field==='netIncome') inp.value=demoNI[i];
+      onHistInput(inp);
+    });
+  });
+};
+</script>
+
+<!-- Demo button in header (subtle) -->
+<style>
+.demo-btn{
+  position:fixed;bottom:24px;right:24px;
+  background:var(--bg-panel-hi);border:1px solid var(--border-hi);
+  color:var(--text-secondary);font-size:0.78rem;font-family:'Inter',sans-serif;
+  padding:8px 14px;border-radius:99px;cursor:pointer;
+  transition:all var(--transition);z-index:200;
+  backdrop-filter:blur(8px);
+}
+.demo-btn:hover{color:var(--accent);border-color:var(--accent);}
+</style>
+<button class="demo-btn" onclick="loadDemo()" title="Load Southern Company demo data">⚡ Load Demo</button>
+
+</body>
+</html>
